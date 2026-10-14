@@ -1,0 +1,340 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SoniAdmin - Ads Manager</title>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 700px;
+      margin: auto;
+      padding: 16px;
+      background: #f3f5f9;
+      color: #202638;
+    }
+    h2 { color: #1749a5; }
+    .panel, .ad {
+      background: white;
+      padding: 16px;
+      border-radius: 12px;
+      margin: 14px 0;
+      box-shadow: 0 2px 8px #0000000c;
+    }
+    input {
+      width: 100%;
+      padding: 12px;
+      margin: 7px 0;
+      border: 1px solid #ccd3df;
+      border-radius: 7px;
+      font-size: 15px;
+    }
+    button {
+      padding: 11px;
+      border: 0;
+      border-radius: 7px;
+      cursor: pointer;
+      color: white;
+      font-weight: bold;
+      margin: 4px 3px 4px 0;
+    }
+    .primary { background: #1764d8; }
+    .edit { background: #e49a13; }
+    .delete { background: #d83245; }
+    .toggle { background: #16845c; }
+    .cancel { background: #667085; }
+    .ad img {
+      display: block;
+      width: 100%;
+      max-height: 230px;
+      object-fit: contain;
+      background: #edf0f5;
+      border-radius: 8px;
+      margin: 10px 0;
+    }
+    .ad button { min-width: 90px; }
+    .url {
+      overflow-wrap: anywhere;
+      font-size: 13px;
+      color: #586174;
+    }
+    .status { font-size: 14px; }
+    .active { color: #16845c; }
+    .inactive { color: #d83245; }
+    .hidden { display: none; }
+    #message { overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+
+  <h2>SoniAdmin</h2>
+  <p>Manage advertisements stored in Firebase.</p>
+  <p id="message" role="status">Connecting to Firebase...</p>
+
+  <section class="panel">
+    <h3 id="formTitle">Add New Advertisement</h3>
+
+    <form id="adForm">
+      <input id="img" type="url"
+        placeholder="Advertisement image URL"
+        aria-label="Advertisement image URL" required>
+
+      <input id="url" type="url"
+        placeholder="Click-through URL"
+        aria-label="Click-through URL" required>
+
+      <button class="primary" id="saveButton" type="submit">
+        Add Advertisement
+      </button>
+
+      <button class="cancel hidden" id="cancelButton" type="button">
+        Cancel Edit
+      </button>
+    </form>
+  </section>
+
+  <section>
+    <h3>All Advertisements (<span id="count">0</span>)</h3>
+    <div id="adsList">Loading advertisements...</div>
+  </section>
+
+<script>
+  // 1. Firebase configuration
+  const firebaseConfig = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "soninke-tv.firebaseapp.com",
+    databaseURL:
+      "https://soninke-tv-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "soninke-tv"
+  };
+
+  firebase.initializeApp(firebaseConfig);
+
+  const db = firebase.database();
+  const adsRef = db.ref("ads");
+
+  const form = document.getElementById("adForm");
+  const imgInput = document.getElementById("img");
+  const urlInput = document.getElementById("url");
+  const list = document.getElementById("adsList");
+  const message = document.getElementById("message");
+  const saveButton = document.getElementById("saveButton");
+  const cancelButton = document.getElementById("cancelButton");
+
+  let editingId = null;
+  let ads = {};
+
+  function showMessage(text, error = false) {
+    message.textContent = text;
+    message.style.color = error ? "#d83245" : "#16845c";
+  }
+
+  // Accept only web URLs for images and click-through links.
+  function validWebUrl(value) {
+    try {
+      const parsed = new URL(value);
+      return parsed.protocol === "https:" ||
+             parsed.protocol === "http:";
+    } catch {
+      return false;
+    }
+  }
+
+  function resetForm() {
+    editingId = null;
+    form.reset();
+    document.getElementById("formTitle").textContent =
+      "Add New Advertisement";
+    saveButton.textContent = "Add Advertisement";
+    cancelButton.classList.add("hidden");
+  }
+
+  cancelButton.addEventListener("click", resetForm);
+
+  // 2. Add or update an advertisement
+  form.addEventListener("submit", async function(event) {
+    event.preventDefault();
+
+    const image = imgInput.value.trim();
+    const clickUrl = urlInput.value.trim();
+
+    if (!validWebUrl(image) || !validWebUrl(clickUrl)) {
+      showMessage("Enter valid HTTP or HTTPS URLs.", true);
+      return;
+    }
+
+    saveButton.disabled = true;
+
+    try {
+      if (editingId) {
+        // Preserve the existing enabled state.
+        await adsRef.child(editingId).update({
+          image: image,
+          url: clickUrl,
+          enabled: ads[editingId]?.enabled !== false,
+          updatedAt: Date.now()
+        });
+
+        showMessage("Advertisement updated successfully.");
+      } else {
+        await adsRef.push({
+          image: image,
+          url: clickUrl,
+          enabled: true,
+          createdAt: Date.now()
+        });
+
+        showMessage("Advertisement added successfully.");
+      }
+
+      resetForm();
+    } catch (error) {
+      showMessage("Save failed: " + error.message, true);
+    } finally {
+      saveButton.disabled = false;
+    }
+  });
+
+  // 3. Edit an existing advertisement
+  function editAd(id) {
+    const ad = ads[id];
+    if (!ad) return;
+
+    editingId = id;
+    imgInput.value = ad.image || "";
+    urlInput.value = ad.url || "";
+
+    document.getElementById("formTitle").textContent =
+      "Edit Advertisement";
+    saveButton.textContent = "Save Changes";
+    cancelButton.classList.remove("hidden");
+
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  // 4. Delete an advertisement
+  async function deleteAd(id) {
+    if (!ads[id]) return;
+
+    if (!confirm("Permanently delete this advertisement?")) return;
+
+    try {
+      await adsRef.child(id).remove();
+
+      if (editingId === id) resetForm();
+
+      showMessage("Advertisement deleted.");
+    } catch (error) {
+      showMessage("Delete failed: " + error.message, true);
+    }
+  }
+
+  // 5. Enable or disable an advertisement
+  async function toggleAd(id) {
+    if (!ads[id]) return;
+
+    try {
+      const enabled = ads[id].enabled === false;
+      await adsRef.child(id).update({
+        enabled: enabled,
+        updatedAt: Date.now()
+      });
+
+      showMessage(
+        enabled ? "Advertisement enabled." : "Advertisement disabled."
+      );
+    } catch (error) {
+      showMessage("Status update failed: " + error.message, true);
+    }
+  }
+
+  // Create interface elements without inserting database text as HTML.
+  function makeButton(label, cssClass, callback) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = cssClass;
+    button.textContent = label;
+    button.addEventListener("click", callback);
+    return button;
+  }
+
+  function renderAds() {
+    list.replaceChildren();
+    const ids = Object.keys(ads);
+    document.getElementById("count").textContent = ids.length;
+
+    if (ids.length === 0) {
+      list.textContent = "No advertisements found.";
+      return;
+    }
+
+    ids.reverse().forEach(id => {
+      const ad = ads[id];
+      const card = document.createElement("article");
+      card.className = "ad";
+
+      const title = document.createElement("h3");
+      title.textContent = "Advertisement";
+      card.appendChild(title);
+
+      const preview = document.createElement("img");
+      preview.src = validWebUrl(ad.image || "")
+        ? ad.image : "";
+      preview.alt = "Advertisement preview";
+      preview.loading = "lazy";
+      preview.referrerPolicy = "no-referrer";
+      preview.addEventListener("error", () => {
+        preview.alt = "Image could not be loaded";
+      });
+      card.appendChild(preview);
+
+      const imageLabel = document.createElement("p");
+      imageLabel.textContent = "Image: " + (ad.image || "Not set");
+      imageLabel.className = "url";
+      card.appendChild(imageLabel);
+
+      const linkLabel = document.createElement("p");
+      linkLabel.textContent = "Click URL: " + (ad.url || "Not set");
+      linkLabel.className = "url";
+      card.appendChild(linkLabel);
+
+      const status = document.createElement("p");
+      const enabled = ad.enabled !== false;
+      status.className = "status " +
+        (enabled ? "active" : "inactive");
+      status.textContent = enabled ? "Enabled" : "Disabled";
+      card.appendChild(status);
+
+      card.appendChild(makeButton("Edit", "edit", () => editAd(id)));
+      card.appendChild(makeButton(
+        "Delete", "delete", () => deleteAd(id)
+      ));
+      card.appendChild(makeButton(
+        enabled ? "Disable" : "Enable",
+        "toggle",
+        () => toggleAd(id)
+      ));
+
+      list.appendChild(card);
+    });
+  }
+
+  // 6. Automatically display database changes
+  adsRef.on("value", snapshot => {
+    ads = snapshot.val() || {};
+    renderAds();
+    showMessage("Connected. Advertisement list is up to date.");
+  }, error => {
+    showMessage("Firebase read failed: " + error.message, true);
+    list.textContent = "Unable to load ads. Check your Firebase rules.";
+  });
+</script>
+
+</body>
+</html>
